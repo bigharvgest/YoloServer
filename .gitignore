@@ -37,7 +37,7 @@ Makefile2
 
 # Ignore any additional files you want to exclude
 *.tgz
-*.zip
+#*.zip
 *.rar
 *.7z
 
@@ -48,3 +48,5 @@ Makefile2
 data/*.mp4
 data/*.jpg
 models/*.onnx
+
+lib/*.lib
