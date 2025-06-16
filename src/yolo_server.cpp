@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <queue>
 
+#include "cryptopp/cryptlib.h"
 #include "mss/mss.hpp"
 #include "yolo/YOLO11-Detect.hpp"
 #include "yolo/YOLO11-OBB.hpp"
@@ -101,32 +102,32 @@ public:
         return latestScreenDetectResult;
     }
 
-    std::string load_model(const std::string& id, const std::string& task, const std::string& modelPath,
+    std::string load_model(const std::string& id, const std::string& task, const std::vector<char>& modelBuffer,
                            const bool isGpu)
     {
         if (task == "detect")
         {
-            modelMap[id] = std::make_shared<YOLO11Detect>(modelPath, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Detect>(modelBuffer, isGpu);
             return successResult;
         }
         if (task == "obb")
         {
-            modelMap[id] = std::make_shared<YOLO11OBB>(modelPath, isGpu);
+            modelMap[id] = std::make_shared<YOLO11OBB>(modelBuffer, isGpu);
             return successResult;
         }
         if (task == "segment")
         {
-            modelMap[id] = std::make_shared<YOLO11Segment>(modelPath, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Segment>(modelBuffer, isGpu);
             return successResult;
         }
         if (task == "pose")
         {
-            modelMap[id] = std::make_shared<YOLO11Pose>(modelPath, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Pose>(modelBuffer, isGpu);
             return successResult;
         }
         if (task == "classify")
         {
-            modelMap[id] = std::make_shared<YOLO11Classify>(modelPath, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Classify>(modelBuffer, isGpu);
             return successResult;
         }
         return failResult;
@@ -281,19 +282,49 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 {
                     std::string id = json.value("id", "default");
                     std::string modelPath = json.value("modelPath", "");
+                    std::string keyPath = json.value("keyPath", "");
                     std::string task = json.value("task", "detect");
                     bool isGpu = json.value("isGpu", false);
 
-                    if (!std::filesystem::exists(YOLOUtils::utf8_to_wstring(modelPath)))
+                    if (std::wstring w_model_path = YOLOUtils::utf8_to_wstring(modelPath); !std::filesystem::exists(
+                        w_model_path))
                     {
                         std::cerr << u8"模型路径不存在: " << modelPath << std::endl;
                     }
                     else
                     {
-                        std::cout << u8"加载模型: id=" << id << ", path=" << modelPath << ", task=" << task << ", gpu=" <<
-                            isGpu << std::endl;
-                        // 加载模型逻辑
-                        result = server.load_model(id, task, modelPath, isGpu);
+                        // 读取密钥（如果有）
+                        std::vector<uchar> keyBuffer;
+                        if (!keyPath.empty())
+                        {
+                            std::wstring w_key_path = YOLOUtils::utf8_to_wstring(keyPath);
+                            if (!std::filesystem::exists(w_key_path))
+                            {
+                                std::cerr << u8"密钥路径不存在: " << keyPath << std::endl;
+                            }
+                            else
+                            {
+                                if (!YOLOUtils::ReadKeyFile(w_key_path, keyBuffer))
+                                {
+                                    std::cerr << u8"读取密钥文件失败" << std::endl;
+                                }
+                            }
+                        }
+
+                        std::vector<char> modelBuffer;
+                        if (YOLOUtils::ReadModelFile(w_model_path, modelBuffer))
+                        {
+                            if (!keyBuffer.empty())
+                            {
+                                modelBuffer = YOLOUtils::Decrypt(modelBuffer, keyBuffer);
+                            }
+
+                            std::cout << u8"加载模型: id=" << id << ", path=" << modelPath << ", task=" << task << ", gpu="
+                                <<
+                                isGpu << std::endl;
+                            // 加载模型逻辑
+                            result = server.load_model(id, task, modelBuffer, isGpu);
+                        }
                     }
                 }
                 else if (action == "unload_model")

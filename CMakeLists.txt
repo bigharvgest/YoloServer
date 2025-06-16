@@ -4,8 +4,8 @@ project(YoloServer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x64-gpu" CACHE PATH "Path to ONNX Runtime")
-message(STATUS "ONNXRUNTIME_DIR: ${ONNXRUNTIME_DIR}")
+set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x64-gpu")
+set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
 
 find_package(OpenCV REQUIRED)
 
@@ -21,7 +21,10 @@ target_link_libraries(YoloServer ${OpenCV_LIBS})
 if (WIN32)
     message(STATUS "We are building on Windows!")
     # Specific Windows build commands or flags
-    target_link_libraries(YoloServer "${ONNXRUNTIME_DIR}/lib/onnxruntime.lib")
+    target_link_libraries(YoloServer
+            ${ONNXRUNTIME_DIR}/lib/onnxruntime.lib
+            debug ${LIB_DIR}/cryptlibd.lib
+            optimized ${LIB_DIR}/cryptlib.lib)
 
     target_compile_options(YoloServer PRIVATE /source-charset:utf-8)
     target_compile_definitions(YoloServer PRIVATE UNICODE _UNICODE)

@@ -117,7 +117,7 @@ namespace SegUtils
 class YOLO11Segment : public YOLO11Model
 {
 public:
-    explicit YOLO11Segment(const std::string& modelPath,
+    explicit YOLO11Segment(const std::vector<char>& modelBuffer,
                            bool useGPU = false);
 
     std::string getTask() const override { return "segment"; }
@@ -170,7 +170,7 @@ private:
                                           float iouThreshold);
 };
 
-inline YOLO11Segment::YOLO11Segment(const std::string& modelPath,
+inline YOLO11Segment::YOLO11Segment(const std::vector<char>& modelBuffer,
                                     bool useGPU)
 {
     ScopedTimer timer("YOLOv11SegDetector Constructor");
@@ -202,12 +202,8 @@ inline YOLO11Segment::YOLO11Segment(const std::string& modelPath,
         std::cout << "Inference device: CPU" << std::endl;
     }
 
-#ifdef _WIN32
-    std::wstring w_modelPath = YOLOUtils::utf8_to_wstring(modelPath);
-    session = Ort::Session(env, w_modelPath.c_str(), sessionOptions);
-#else
-    session = Ort::Session(env, modelPath.c_str(), sessionOptions);
-#endif
+    // Load the ONNX model into the session
+    session = Ort::Session(env, modelBuffer.data(), modelBuffer.size(), sessionOptions);
 
     numInputNodes = session.GetInputCount();
     numOutputNodes = session.GetOutputCount();
@@ -250,7 +246,7 @@ inline YOLO11Segment::YOLO11Segment(const std::string& modelPath,
     if (search != nullptr) { classNames = YOLOUtils::parseClassNames(search.get()); }
     classColors = YOLOUtils::generateColors(classNames);
 
-    std::cout << "[INFO] YOLO11Seg loaded: " << modelPath << std::endl
+    std::cout << "[INFO] YOLO11Segment loaded, " << std::endl
         << "      Input shape: " << inputImageShape
         << (isDynamicInputShape ? " (dynamic)" : "") << std::endl
         << "      #Outputs   : " << numOutputNodes << std::endl
@@ -315,8 +311,9 @@ std::vector<Segmentation> YOLO11Segment::postprocess(
     auto shape0 = outputs[0].GetTensorTypeAndShapeInfo().GetShape(); // [1, 116, num_detections]
     auto shape1 = outputs[1].GetTensorTypeAndShapeInfo().GetShape(); // [1, 32, maskH, maskW]
 
-    if (shape1.size() != 4 || shape1[0] != 1 || shape1[1] != 32) throw std::runtime_error(
-        "Unexpected output1 shape. Expected [1, 32, maskH, maskW].");
+    if (shape1.size() != 4 || shape1[0] != 1 || shape1[1] != 32)
+        throw std::runtime_error(
+            "Unexpected output1 shape. Expected [1, 32, maskH, maskW].");
 
     const size_t num_features = shape0[1]; // e.g 80 class + 4 bbox parms + 32 seg masks = 116
     const size_t num_detections = shape0[2];

@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -17,6 +18,14 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <cryptopp/cryptlib.h>
+#include <cryptopp/secblock.h>
+#include <cryptopp/sha.h>
+#include <cryptopp/hex.h>
+#include <cryptopp/aes.h>
+#include <cryptopp/gcm.h>
+#include <cryptopp/filters.h>
 
 class YOLO11Model
 {
@@ -319,5 +328,104 @@ namespace YOLOUtils
             result.height = clamp(result.height, 0, imageOriginalShape.height - result.y);
         }
         return result;
+    }
+
+    /**
+     * 解密模型
+     * @param encryptedDataWithIvTag 加密模型数据
+     * @param keyBuffer  密钥数据
+     * @return 解密模型数据
+     */
+    inline std::vector<char> Decrypt(
+        const std::vector<char>& encryptedDataWithIvTag,
+        const std::vector<uchar>& keyBuffer)
+    {
+        constexpr size_t ivLen = 12;
+        constexpr size_t tagLen = 16;
+
+        if (encryptedDataWithIvTag.size() < ivLen + tagLen)
+        {
+            throw std::runtime_error("输入数据太短，无法拆分IV和Tag");
+        }
+
+        CryptoPP::SecByteBlock key(keyBuffer.data(), keyBuffer.size());
+
+        const size_t totalSize = encryptedDataWithIvTag.size();
+        const char* pData = encryptedDataWithIvTag.data();
+
+        const byte* iv = reinterpret_cast<const byte*>(pData);
+        const byte* tag = reinterpret_cast<const byte*>(pData + ivLen);
+        size_t cipherLen = totalSize - ivLen - tagLen;
+        const byte* cipherText = reinterpret_cast<const byte*>(pData + ivLen + tagLen);
+
+        std::vector<byte> cipherWithTag(cipherLen + tagLen);
+        memcpy(cipherWithTag.data(), cipherText, cipherLen);
+        memcpy(cipherWithTag.data() + cipherLen, tag, tagLen);
+
+        CryptoPP::GCM<CryptoPP::AES>::Decryption decryptor;
+        decryptor.SetKeyWithIV(key, key.size(), iv, ivLen);
+
+        std::vector<byte> recovered;
+        CryptoPP::AuthenticatedDecryptionFilter df(
+            decryptor,
+            new CryptoPP::VectorSink(recovered),
+            CryptoPP::AuthenticatedDecryptionFilter::DEFAULT_FLAGS,
+            tagLen);
+
+        CryptoPP::StringSource ss(cipherWithTag.data(), cipherWithTag.size(), true, new CryptoPP::Redirector(df));
+
+        if (!df.GetLastResult())
+        {
+            throw std::runtime_error("消息认证失败，解密失败");
+        }
+
+        return std::vector<char>(recovered.begin(), recovered.end());
+    }
+
+    // 读取二进制密钥文件
+    inline bool ReadKeyFile(const std::wstring& w_key_path, std::vector<uchar>& keyBuffer)
+    {
+        std::ifstream keyFile(w_key_path, std::ios::binary);
+        if (!keyFile)
+        {
+            std::cerr << u8"打开密钥文件失败" << std::endl;
+            return false;
+        }
+
+        keyFile.seekg(0, std::ios::end);
+        size_t size = keyFile.tellg();
+        keyFile.seekg(0, std::ios::beg);
+
+        keyBuffer.resize(size);
+        if (!keyFile.read(reinterpret_cast<char*>(keyBuffer.data()), size))
+        {
+            std::cerr << u8"读取密钥文件失败 " << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
+    // 读取二进制模型文件到 buffer
+    inline bool ReadModelFile(const std::wstring& w_model_path, std::vector<char>& modelBuffer)
+    {
+        std::ifstream modelFile(w_model_path, std::ios::binary);
+        if (!modelFile)
+        {
+            std::cerr << u8"打开模型文件失败" << std::endl;
+            return false;
+        }
+
+        modelFile.seekg(0, std::ios::end);
+        size_t size = modelFile.tellg();
+        modelFile.seekg(0, std::ios::beg);
+
+        modelBuffer.resize(size);
+        if (!modelFile.read(modelBuffer.data(), size))
+        {
+            std::cerr << u8"读取模型文件失败" << std::endl;
+            return false;
+        }
+        return true;
     }
 }

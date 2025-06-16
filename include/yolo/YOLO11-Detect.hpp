@@ -283,10 +283,10 @@ public:
     /**
      * @brief Constructor to initialize the YOLO detector with model and label paths.
      *
-     * @param modelPath Path to the ONNX model file.
+     * @param modelBuffer 模型二进制
      * @param useGPU Whether to use GPU for inference (default is false).
      */
-    explicit YOLO11Detect(const std::string& modelPath, bool useGPU = false);
+    explicit YOLO11Detect(const std::vector<char>& modelBuffer, bool useGPU = false);
 
     std::string getTask() const override { return "detect"; }
 
@@ -396,7 +396,7 @@ private:
 };
 
 // Implementation of YOLO11Detector constructor
-inline YOLO11Detect::YOLO11Detect(const std::string& modelPath, bool useGPU)
+inline YOLO11Detect::YOLO11Detect(const std::vector<char>& modelBuffer, bool useGPU)
 {
     // 初始化 ONNX Runtime 环境，设置警告级别为警告
     env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "YOLO_DETECT");
@@ -429,12 +429,7 @@ inline YOLO11Detect::YOLO11Detect(const std::string& modelPath, bool useGPU)
     }
 
     // Load the ONNX model into the session
-#ifdef _WIN32
-    std::wstring w_modelPath = YOLOUtils::utf8_to_wstring(modelPath);
-    session = Ort::Session(env, w_modelPath.c_str(), sessionOptions);
-#else
-    session = Ort::Session(env, modelPath.c_str(), sessionOptions);
-#endif
+    session = Ort::Session(env, modelBuffer.data(), modelBuffer.size(), sessionOptions);
 
     Ort::AllocatorWithDefaultOptions allocator;
 
