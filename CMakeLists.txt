@@ -24,7 +24,8 @@ if (WIN32)
     target_link_libraries(YoloServer
             ${ONNXRUNTIME_DIR}/lib/onnxruntime.lib
             debug ${LIB_DIR}/cryptlibd.lib
-            optimized ${LIB_DIR}/cryptlib.lib)
+            optimized ${LIB_DIR}/cryptlib.lib
+    )
 
     target_compile_options(YoloServer PRIVATE /source-charset:utf-8)
     target_compile_definitions(YoloServer PRIVATE UNICODE _UNICODE)
