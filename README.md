@@ -12,3 +12,4 @@
 
 ## 支持Yolov5-yolov8-yolo11-Yolo12模型调用
 
+## [演示视频点此](https://www.bilibili.com/video/BV1xuMqznE9C)
