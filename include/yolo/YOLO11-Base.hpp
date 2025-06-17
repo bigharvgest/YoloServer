@@ -26,6 +26,7 @@
 #include <cryptopp/aes.h>
 #include <cryptopp/gcm.h>
 #include <cryptopp/filters.h>
+#include <cryptopp/pwdbased.h>
 
 class YOLO11Model
 {
@@ -331,41 +332,77 @@ namespace YOLOUtils
     }
 
     /**
+     * 通过密码和盐生成固定长度密钥
+     * @param password 密码
+     * @param salt 盐
+     * @param saltLen 盐长度
+     * @param keyLen 密钥长度
+     * @param iterations 迭代次数
+     * @return
+     */
+    inline CryptoPP::SecByteBlock DeriveKey(
+        const std::string& password,
+        const CryptoPP::byte* salt,
+        size_t saltLen,
+        size_t keyLen = 32, // 256-bit key
+        unsigned int iterations = 100000)
+    {
+        CryptoPP::SecByteBlock key(keyLen);
+
+        CryptoPP::PKCS5_PBKDF2_HMAC<CryptoPP::SHA256> pbkdf2;
+        pbkdf2.DeriveKey(
+            key, keyLen,
+            0,
+            reinterpret_cast<const CryptoPP::byte*>(password.data()), password.size(),
+            salt, saltLen,
+            iterations);
+
+        return key;
+    }
+
+    /**
      * 解密模型
-     * @param encryptedDataWithIvTag 加密模型数据
-     * @param keyBuffer  密钥数据
+     * @param encryptedDataWithSaltIvTag 加密模型数据
+     * @param password  密码
      * @return 解密模型数据
      */
     inline std::vector<char> Decrypt(
-        const std::vector<char>& encryptedDataWithIvTag,
-        const std::vector<uchar>& keyBuffer)
+        const std::vector<char>& encryptedDataWithSaltIvTag,
+        const std::string& password)
     {
+        constexpr size_t saltLen = 16;
         constexpr size_t ivLen = 12;
         constexpr size_t tagLen = 16;
 
-        if (encryptedDataWithIvTag.size() < ivLen + tagLen)
+        if (encryptedDataWithSaltIvTag.size() < saltLen + ivLen + tagLen)
         {
-            throw std::runtime_error("输入数据太短，无法拆分IV和Tag");
+            throw std::runtime_error("输入数据太短，无法拆分Salt、IV和Tag");
         }
 
-        CryptoPP::SecByteBlock key(keyBuffer.data(), keyBuffer.size());
+        const char* pData = encryptedDataWithSaltIvTag.data();
 
-        const size_t totalSize = encryptedDataWithIvTag.size();
-        const char* pData = encryptedDataWithIvTag.data();
+        // 取盐
+        const auto* salt = reinterpret_cast<const CryptoPP::byte*>(pData);
 
-        const byte* iv = reinterpret_cast<const byte*>(pData);
-        const byte* tag = reinterpret_cast<const byte*>(pData + ivLen);
-        size_t cipherLen = totalSize - ivLen - tagLen;
-        const byte* cipherText = reinterpret_cast<const byte*>(pData + ivLen + tagLen);
+        // 派生密钥
+        auto key = DeriveKey(password, salt, saltLen);
 
-        std::vector<byte> cipherWithTag(cipherLen + tagLen);
+        // 取 IV 和 Tag
+        const auto* iv = reinterpret_cast<const CryptoPP::byte*>(pData + saltLen);
+        const auto* tag = reinterpret_cast<const CryptoPP::byte*>(pData + saltLen + ivLen);
+
+        size_t cipherLen = encryptedDataWithSaltIvTag.size() - saltLen - ivLen - tagLen;
+        const auto* cipherText = reinterpret_cast<const CryptoPP::byte*>(pData + saltLen + ivLen + tagLen);
+
+        // 组装 cipher + tag (Crypto++ AES-GCM 解密要求)
+        std::vector<CryptoPP::byte> cipherWithTag(cipherLen + tagLen);
         memcpy(cipherWithTag.data(), cipherText, cipherLen);
         memcpy(cipherWithTag.data() + cipherLen, tag, tagLen);
 
         CryptoPP::GCM<CryptoPP::AES>::Decryption decryptor;
         decryptor.SetKeyWithIV(key, key.size(), iv, ivLen);
 
-        std::vector<byte> recovered;
+        std::vector<CryptoPP::byte> recovered;
         CryptoPP::AuthenticatedDecryptionFilter df(
             decryptor,
             new CryptoPP::VectorSink(recovered),
@@ -380,30 +417,6 @@ namespace YOLOUtils
         }
 
         return std::vector<char>(recovered.begin(), recovered.end());
-    }
-
-    // 读取二进制密钥文件
-    inline bool ReadKeyFile(const std::wstring& w_key_path, std::vector<uchar>& keyBuffer)
-    {
-        std::ifstream keyFile(w_key_path, std::ios::binary);
-        if (!keyFile)
-        {
-            std::cerr << u8"打开密钥文件失败" << std::endl;
-            return false;
-        }
-
-        keyFile.seekg(0, std::ios::end);
-        size_t size = keyFile.tellg();
-        keyFile.seekg(0, std::ios::beg);
-
-        keyBuffer.resize(size);
-        if (!keyFile.read(reinterpret_cast<char*>(keyBuffer.data()), size))
-        {
-            std::cerr << u8"读取密钥文件失败 " << std::endl;
-            return false;
-        }
-
-        return true;
     }
 
     // 读取二进制模型文件到 buffer

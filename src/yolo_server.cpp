@@ -282,7 +282,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 {
                     std::string id = json.value("id", "default");
                     std::string modelPath = json.value("modelPath", "");
-                    std::string keyPath = json.value("keyPath", "");
+                    std::string password = json.value("password", "");
                     std::string task = json.value("task", "detect");
                     bool isGpu = json.value("isGpu", false);
 
@@ -293,30 +293,12 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                     }
                     else
                     {
-                        // 读取密钥（如果有）
-                        std::vector<uchar> keyBuffer;
-                        if (!keyPath.empty())
-                        {
-                            std::wstring w_key_path = YOLOUtils::utf8_to_wstring(keyPath);
-                            if (!std::filesystem::exists(w_key_path))
-                            {
-                                std::cerr << u8"密钥路径不存在: " << keyPath << std::endl;
-                            }
-                            else
-                            {
-                                if (!YOLOUtils::ReadKeyFile(w_key_path, keyBuffer))
-                                {
-                                    std::cerr << u8"读取密钥文件失败" << std::endl;
-                                }
-                            }
-                        }
-
                         std::vector<char> modelBuffer;
                         if (YOLOUtils::ReadModelFile(w_model_path, modelBuffer))
                         {
-                            if (!keyBuffer.empty())
+                            if (!password.empty())
                             {
-                                modelBuffer = YOLOUtils::Decrypt(modelBuffer, keyBuffer);
+                                modelBuffer = YOLOUtils::Decrypt(modelBuffer, password);
                             }
 
                             std::cout << u8"加载模型: id=" << id << ", path=" << modelPath << ", task=" << task << ", gpu="
