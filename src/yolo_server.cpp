@@ -222,7 +222,7 @@ public:
 };
 
 // 封装带超时的读取4字节函数
-uint32_t ReadUint32FromPipeWithTimeout(HANDLE pipe, DWORD timeoutMs)
+uint32_t ReadUint32FromPipeWithTimeout(const HANDLE pipe, const DWORD timeoutMs)
 {
     uint8_t buf[4] = {};
     DWORD bytesRead = 0;
@@ -302,6 +302,43 @@ std::vector<char> ReadDataFromPipe(const HANDLE pipe, const size_t length)
         totalRead += bytesRead;
     }
     return buffer;
+}
+
+// 返回值：true表示写入成功且写入字节数与len一致，false表示失败或写入不完整
+bool WriteToPipe(const HANDLE pipe, const char* data, const DWORD len)
+{
+    DWORD totalWritten = 0;
+    while (totalWritten < len)
+    {
+        DWORD bytesWritten = 0;
+        if (const BOOL result = WriteFile(pipe, data + totalWritten, len - totalWritten, &bytesWritten, nullptr); !
+            result)
+        {
+            const DWORD err = GetLastError();
+            std::cerr << u8"向管道写入失败，错误码：" << err << std::endl;
+            return false;
+        }
+        if (bytesWritten == 0)
+        {
+            std::cerr << u8"向管道写入失败，写入字节数为0" << std::endl;
+            return false;
+        }
+        totalWritten += bytesWritten;
+    }
+
+    if (!FlushFileBuffers(pipe))
+    {
+        std::cerr << u8"刷新管道缓冲区失败，错误码：" << GetLastError() << std::endl;
+        // 这里一般不影响写入结果，不返回false
+    }
+
+    return true;
+}
+
+// C++ string版重载，方便直接传std::string
+bool WriteToPipe(HANDLE pipe, const std::string& data)
+{
+    return WriteToPipe(pipe, data.data(), static_cast<DWORD>(data.size()));
 }
 
 // 处理客户端请求
@@ -419,23 +456,14 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
 
             if (!result.empty())
             {
-                // 向客户端发送数据
-                DWORD bytesWritten = 0;
-                auto len = static_cast<DWORD>(result.size());
-
-                if (BOOL writeResult = WriteFile(pipe, result.c_str(), len, &bytesWritten, nullptr); !writeResult)
+                if (!WriteToPipe(pipe, result))
                 {
-                    std::cerr << u8"写入命名管道失败, 异常: " << GetLastError() << std::endl;
-                }
-                else if (bytesWritten != len)
-                {
-                    std::cerr << u8"写入命名管道失败, 写入字节数: " << bytesWritten << ", 期望字节数: " << len << std::endl;
+                    std::cerr << u8"写入命名管道失败" << std::endl;
                 }
                 else
                 {
                     DEBUG_PRINT(u8"成功写入数据: " << result)
                 }
-                FlushFileBuffers(pipe);
             }
         }
         catch (const std::exception& ex)
@@ -458,23 +486,14 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                     {"message", ex.what()}
                 };
                 std::string errorStr = errorJson.dump();
-
-                DWORD bytesWritten = 0;
-                auto len = static_cast<DWORD>(errorStr.size());
-
-                if (BOOL writeResult = WriteFile(pipe, errorStr.c_str(), len, &bytesWritten, nullptr); !writeResult)
+                if (!WriteToPipe(pipe, errorStr))
                 {
-                    std::cerr << u8"异常处理时写入管道失败, 错误码: " << GetLastError() << std::endl;
-                }
-                else if (bytesWritten != len)
-                {
-                    std::cerr << u8"异常处理时写入管道不完整, 写入字节数: " << bytesWritten << ", 期望字节数: " << len << std::endl;
+                    std::cerr << u8"异常处理时写入管道失败" << std::endl;
                 }
                 else
                 {
                     DEBUG_PRINT(u8"异常信息已发送给客户端")
                 }
-                FlushFileBuffers(pipe);
             }
             catch (const std::exception& innerEx)
             {
@@ -513,7 +532,7 @@ int main()
     YOLOServer server;
 
     const auto pipeName = L"\\\\.\\pipe\\YoloServerPipe";
-    HANDLE hPipe = CreateNamedPipeW(
+    const HANDLE hPipe = CreateNamedPipeW(
         pipeName,
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
@@ -529,8 +548,8 @@ int main()
     }
 
     std::cout << u8"等待客户端连接..." << std::endl;
-    BOOL connected = ConnectNamedPipe(hPipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
-    if (!connected)
+    if (const BOOL connected = ConnectNamedPipe(hPipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED); !
+        connected)
     {
         std::cerr << u8"连接客户端失败: " << GetLastError() << std::endl;
         CloseHandle(hPipe);
