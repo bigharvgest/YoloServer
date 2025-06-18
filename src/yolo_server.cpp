@@ -36,6 +36,7 @@ public:
         fail_result_["count"] = 0;
         fail_result_["success"] = false;
         failResult = fail_result_.dump();
+        latestScreenDetectResult = fail_result_.dump();
 
         nlohmann::json success_result_;
         success_result_["success"] = true;
@@ -51,8 +52,8 @@ public:
 
     // 启动屏幕采集和检测线程
     void start_screen_detect_thread(const std::string& modelId,
-                                    float confThreshold = 0.4f,
-                                    float iouThreshold = 0.45f)
+                                    const float confThreshold = 0.4f,
+                                    const float iouThreshold = 0.45f)
     {
         if (screenDetectRunning.load())
         {
@@ -142,10 +143,12 @@ public:
     }
 
     // 启动屏幕截图
-    std::string start_capture(const std::string& id, const float confThreshold, const float iouThreshold)
+    std::string start_capture(const std::string& id, const float confThreshold, const float iouThreshold,
+                              const int monitor_index, const int x,
+                              const int y, const int width, const int height)
     {
         start_screen_detect_thread(id, confThreshold, iouThreshold);
-        mss.start_capture();
+        mss.start_capture(monitor_index, x, y, width, height);
         return successResult;
     }
 
@@ -374,6 +377,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
             if (json.contains("action"))
             {
                 std::string action = json["action"];
+                // 加载模型
                 if (action == "load_model")
                 {
                     std::string id = json.value("id", "default");
@@ -405,6 +409,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                         }
                     }
                 }
+                // 卸载模型
                 else if (action == "unload_model")
                 {
                     std::string id = json.value("id", "default");
@@ -412,14 +417,20 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                     // 卸载模型逻辑
                     result = server.unload_model(id);
                 }
+                // 开始捕获屏幕
                 else if (action == "start_capture")
                 {
                     std::string id = json.value("id", "default");
                     float confThreshold = json.value("confThreshold", 0.4f);
                     float iouThreshold = json.value("iouThreshold", 0.45f);
+                    int monitor_index = json.value("monitor_index", 0);
+                    int x = json.value("x", 0);
+                    int y = json.value("y", 0);
+                    int width = json.value("width", 0);
+                    int height = json.value("height", 0);
                     std::cout << u8"开始捕获屏幕" << std::endl;
                     // 开始捕获屏幕逻辑
-                    result = server.start_capture(id, confThreshold, iouThreshold);
+                    result = server.start_capture(id, confThreshold, iouThreshold, monitor_index, x, y, width, height);
                 }
                 else if (action == "stop_capture")
                 {
