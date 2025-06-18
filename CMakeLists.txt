@@ -1,12 +1,22 @@
-cmake_minimum_required(VERSION 3.10.0)
+cmake_minimum_required(VERSION 3.15.0)
 project(YoloServer)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDebug")
+else ()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+endif ()
+
 set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-win-x64-gpu")
 set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
 
+# 指定 Eigen3_DIR 直接指向配置文件目录
+set(Eigen3_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 
 include_directories("include/")
@@ -16,7 +26,7 @@ add_executable(YoloServer
         src/yolo_server.cpp)
 
 target_include_directories(YoloServer PRIVATE "${ONNXRUNTIME_DIR}/include")
-target_link_libraries(YoloServer ${OpenCV_LIBS})
+target_link_libraries(YoloServer Eigen3::Eigen ${OpenCV_LIBS})
 
 if (WIN32)
     message(STATUS "We are building on Windows!")
