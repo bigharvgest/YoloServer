@@ -84,11 +84,20 @@ struct PoseDetection
 
 inline void to_json(nlohmann::json& j, const PoseDetection& pd)
 {
+    // 将 keypoints 转成扁平数组 [x,y,conf,x,y,conf,...]
+    std::vector<float> keypoints_flat;
+    keypoints_flat.reserve(pd.keypoints.size() * 3);
+    for (const auto& kp : pd.keypoints)
+    {
+        keypoints_flat.push_back(kp.x);
+        keypoints_flat.push_back(kp.y);
+        keypoints_flat.push_back(kp.conf);
+    }
     j = nlohmann::json{
         {"box", pd.box},
         {"conf", pd.conf},
         {"classId", pd.classId},
-        {"keypoints", pd.keypoints},
+        {"keypoints", keypoints_flat},
     };
 }
 
