@@ -17,7 +17,6 @@ class YOLOServer
 {
 private:
     MSS mss;
-    std::string defaultResult;
     std::string successResult;
     std::string failResult;
     std::unordered_map<std::string, std::shared_ptr<YOLO11Model>> modelMap;
@@ -32,20 +31,22 @@ public:
     explicit YOLOServer()
     {
         auto monitors = mss.get_monitors();
-        nlohmann::json null_result;
-        null_result["results"] = nlohmann::json::array();
-        null_result["count"] = 0;
-        null_result["success"] = false;
-        defaultResult = null_result.dump();
-        latestScreenDetectResult = null_result.dump();
+        nlohmann::json fail_result_;
+        fail_result_["results"] = nlohmann::json::array();
+        fail_result_["count"] = 0;
+        fail_result_["success"] = false;
+        failResult = fail_result_.dump();
 
-        nlohmann::json success_result;
-        success_result["success"] = true;
-        successResult = success_result.dump();
+        nlohmann::json success_result_;
+        success_result_["success"] = true;
+        success_result_["results"] = nlohmann::json::array();
+        success_result_["count"] = 0;
+        successResult = success_result_.dump();
+    }
 
-        nlohmann::json fail_result;
-        fail_result["success"] = false;
-        failResult = fail_result.dump();
+    std::string getFailResult()
+    {
+        return failResult;
     }
 
     // 启动屏幕采集和检测线程
@@ -70,9 +71,8 @@ public:
                     continue;
                 }
 
-                std::string detectResult = detect(modelId, frame, confThreshold, iouThreshold);
-
                 {
+                    const std::string detectResult = detect(modelId, frame, confThreshold, iouThreshold);
                     std::lock_guard lock(screenDetectMutex);
                     latestScreenDetectResult = detectResult;
                 }
@@ -80,7 +80,7 @@ public:
 
             {
                 std::lock_guard lock(screenDetectMutex);
-                latestScreenDetectResult = defaultResult;
+                latestScreenDetectResult = failResult;
             }
         });
         screenDetectThread.detach();
@@ -102,6 +102,7 @@ public:
         return latestScreenDetectResult;
     }
 
+    // 加载模型
     std::string load_model(const std::string& id, const std::string& task, const std::vector<char>& modelBuffer,
                            const bool isGpu)
     {
@@ -133,12 +134,14 @@ public:
         return failResult;
     }
 
+    // 卸载模型
     std::string unload_model(const std::string& id)
     {
         if (const auto it = modelMap.find(id); it != modelMap.end()) { modelMap.erase(it); }
         return successResult;
     }
 
+    // 启动屏幕截图
     std::string start_capture(const std::string& id, const float confThreshold, const float iouThreshold)
     {
         start_screen_detect_thread(id, confThreshold, iouThreshold);
@@ -146,6 +149,7 @@ public:
         return successResult;
     }
 
+    // 停止屏幕截图
     std::string stop_capture()
     {
         stop_screen_detect_thread();
@@ -153,8 +157,10 @@ public:
         return successResult;
     }
 
+    // 获取屏幕截图
     cv::Mat wait_and_get_frame() { return mss.wait_and_get_frame(); }
 
+    // 检测图像
     std::string detect(const std::string& id, const cv::Mat& image, const float confThreshold, const float iouThreshold)
     {
         if (auto it = modelMap.find(id); it != modelMap.end())
@@ -211,21 +217,73 @@ public:
                 return j.dump();
             }
         }
-        return defaultResult;
+        return failResult;
     }
 };
 
-// 读取4字节
-uint32_t ReadUint32FromPipe(const HANDLE pipe)
+// 封装带超时的读取4字节函数
+uint32_t ReadUint32FromPipeWithTimeout(HANDLE pipe, DWORD timeoutMs)
 {
-    uint8_t buf[4];
+    uint8_t buf[4] = {};
     DWORD bytesRead = 0;
-    if (!ReadFile(pipe, buf, 4, &bytesRead, nullptr) || bytesRead != 4)
+    OVERLAPPED overlapped = {};
+    overlapped.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!overlapped.hEvent)
     {
+        throw std::runtime_error(u8"创建事件失败");
+    }
+
+    const BOOL readResult = ReadFile(pipe, buf, 4, nullptr, &overlapped);
+    if (!readResult)
+    {
+        const DWORD err = GetLastError();
+        if (err != ERROR_IO_PENDING)
+        {
+            CloseHandle(overlapped.hEvent);
+            if (err == ERROR_BROKEN_PIPE)
+            {
+                throw std::runtime_error(u8"客户端已断开连接");
+            }
+            throw std::runtime_error(u8"ReadFile失败，错误码：" + std::to_string(err));
+        }
+    }
+
+    // 等待读取完成或超时
+    const DWORD waitRes = WaitForSingleObject(overlapped.hEvent, timeoutMs);
+    if (waitRes == WAIT_TIMEOUT)
+    {
+        CancelIo(pipe); // 取消IO请求
+        CloseHandle(overlapped.hEvent);
+        // 超时返回0
         return 0;
     }
-    return static_cast<uint32_t>(buf[3]) << 24 | static_cast<uint32_t>(buf[2]) << 16 | static_cast<uint32_t>(buf[1]) <<
-        8 | static_cast<uint32_t>(buf[0]);
+    else if (waitRes != WAIT_OBJECT_0)
+    {
+        CloseHandle(overlapped.hEvent);
+        throw std::runtime_error(u8"等待事件失败");
+    }
+
+    // 获取实际读取字节数
+    if (!GetOverlappedResult(pipe, &overlapped, &bytesRead, FALSE))
+    {
+        const DWORD err = GetLastError();
+        CloseHandle(overlapped.hEvent);
+        if (err == ERROR_BROKEN_PIPE)
+            throw std::runtime_error(u8"客户端已断开连接");
+        throw std::runtime_error(u8"GetOverlappedResult失败，错误码：" + std::to_string(err));
+    }
+
+    CloseHandle(overlapped.hEvent);
+
+    if (bytesRead != 4)
+    {
+        throw std::runtime_error(u8"读取字节不足4字节，可能管道断开");
+    }
+
+    return static_cast<uint32_t>(buf[3]) << 24 |
+        static_cast<uint32_t>(buf[2]) << 16 |
+        static_cast<uint32_t>(buf[1]) << 8 |
+        static_cast<uint32_t>(buf[0]);
 }
 
 // 读取指定长度数据到缓冲区
@@ -238,21 +296,22 @@ std::vector<char> ReadDataFromPipe(const HANDLE pipe, const size_t length)
     {
         if (!ReadFile(pipe, buffer.data() + totalRead, static_cast<DWORD>(length - totalRead), &bytesRead, nullptr))
         {
-            throw std::runtime_error("读取数据失败");
+            throw std::runtime_error(u8"读取数据失败");
         }
-        if (bytesRead == 0) { throw std::runtime_error("管道读取结束"); }
+        if (bytesRead == 0) { throw std::runtime_error(u8"管道读取结束"); }
         totalRead += bytesRead;
     }
     return buffer;
 }
 
+// 处理客户端请求
 void ProcessClient(HANDLE pipe, YOLOServer& server)
 {
-    try
+    while (true)
     {
-        while (true)
+        try
         {
-            uint32_t jsonLength = ReadUint32FromPipe(pipe);
+            uint32_t jsonLength = ReadUint32FromPipeWithTimeout(pipe, 2000);
             if (jsonLength == 0)
             {
                 continue;
@@ -274,7 +333,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 std::cout << u8"读取到二进制数据长度: " << binaryLength << std::endl;
             }
 
-            std::string result = R"({"success": false})";
+            std::string result = server.getFailResult();
             if (json.contains("action"))
             {
                 std::string action = json["action"];
@@ -362,10 +421,9 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
             {
                 // 向客户端发送数据
                 DWORD bytesWritten = 0;
-                DWORD len = static_cast<DWORD>(result.size()); // 推荐用 size()
+                auto len = static_cast<DWORD>(result.size());
 
-                BOOL writeResult = WriteFile(pipe, result.c_str(), len, &bytesWritten, nullptr);
-                if (!writeResult)
+                if (BOOL writeResult = WriteFile(pipe, result.c_str(), len, &bytesWritten, nullptr); !writeResult)
                 {
                     std::cerr << u8"写入命名管道失败, 异常: " << GetLastError() << std::endl;
                 }
@@ -380,8 +438,51 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 FlushFileBuffers(pipe);
             }
         }
+        catch (const std::exception& ex)
+        {
+            if (DWORD lastError = GetLastError(); lastError == ERROR_BROKEN_PIPE)
+            {
+                // 客户端断开，退出循环关闭管道
+                std::cerr << u8"客户端已断开连接" << std::endl;
+                break;
+            }
+
+            std::cerr << u8"处理客户端异常: " << ex.what() << std::endl;
+            try
+            {
+                // 将异常信息封装成 JSON 结构字符串发回客户端
+                nlohmann::json errorJson = {
+                    {"success", false},
+                    {"results", nlohmann::json::array()},
+                    {"count", 0},
+                    {"message", ex.what()}
+                };
+                std::string errorStr = errorJson.dump();
+
+                DWORD bytesWritten = 0;
+                auto len = static_cast<DWORD>(errorStr.size());
+
+                if (BOOL writeResult = WriteFile(pipe, errorStr.c_str(), len, &bytesWritten, nullptr); !writeResult)
+                {
+                    std::cerr << u8"异常处理时写入管道失败, 错误码: " << GetLastError() << std::endl;
+                }
+                else if (bytesWritten != len)
+                {
+                    std::cerr << u8"异常处理时写入管道不完整, 写入字节数: " << bytesWritten << ", 期望字节数: " << len << std::endl;
+                }
+                else
+                {
+                    DEBUG_PRINT(u8"异常信息已发送给客户端")
+                }
+                FlushFileBuffers(pipe);
+            }
+            catch (const std::exception& innerEx)
+            {
+                std::cerr << u8"处理异常时再次发生异常: " << innerEx.what() << std::endl;
+            }
+        }
     }
-    catch (const std::exception& ex) { std::cerr << u8"处理客户端异常: " << ex.what() << std::endl; }
+
 
     DisconnectNamedPipe(pipe);
     CloseHandle(pipe);
@@ -398,51 +499,48 @@ int main()
     HANDLE mutex = CreateMutex(nullptr, TRUE, L"YoloServerMutex");
     if (mutex == nullptr)
     {
-        std::cerr << "CreateMutex failed, error: " << GetLastError() << std::endl;
+        std::cerr << u8"CreateMutex failed, error: " << GetLastError() << std::endl;
         return 1;
     }
     // 如果已经有实例在运行，GetLastError == ERROR_ALREADY_EXISTS
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
-        std::cout << "程序已经在运行，退出..." << std::endl;
+        std::cout << u8"程序已经在运行，退出..." << std::endl;
         CloseHandle(mutex);
         return 0;
     }
 
     YOLOServer server;
 
-    while (true)
+    const auto pipeName = L"\\\\.\\pipe\\YoloServerPipe";
+    HANDLE hPipe = CreateNamedPipeW(
+        pipeName,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1, // 限制客户端数量为1
+        4096, 4096,
+        0,
+        nullptr);
+
+    if (hPipe == INVALID_HANDLE_VALUE)
     {
-        const auto pipeName = L"\\\\.\\pipe\\YoloServerPipe";
-        // 创建管道实例，注意这里设置最大实例数为 PIPE_UNLIMITED_INSTANCES，支持多客户端
-        HANDLE hPipe = CreateNamedPipeW(
-            pipeName,
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES,
-            4096, 4096,
-            0,
-            nullptr);
-
-        if (hPipe == INVALID_HANDLE_VALUE)
-        {
-            std::cerr << u8"创建命名管道失败: " << GetLastError() << std::endl;
-            break;
-        }
-
-        BOOL connected = ConnectNamedPipe(hPipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
-        if (connected)
-        {
-            std::cout << u8"有客户端连接进来，创建线程处理" << std::endl;
-            std::thread clientThread(ProcessClient, hPipe, std::ref(server));
-            clientThread.detach();
-        }
-        else
-        {
-            std::cerr << u8"等待客户端连接失败: " << GetLastError() << std::endl;
-            CloseHandle(hPipe);
-        }
+        std::cerr << u8"创建命名管道失败: " << GetLastError() << std::endl;
+        return 1;
     }
+
+    std::cout << u8"等待客户端连接..." << std::endl;
+    BOOL connected = ConnectNamedPipe(hPipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+    if (!connected)
+    {
+        std::cerr << u8"连接客户端失败: " << GetLastError() << std::endl;
+        CloseHandle(hPipe);
+        CloseHandle(mutex);
+        return 1;
+    }
+
+    std::cout << u8"客户端已连接，开始处理" << std::endl;
+    ProcessClient(hPipe, server);
+    std::cout << u8"客户端断开，程序退出" << std::endl;
 
     CloseHandle(mutex);
     return 0;
