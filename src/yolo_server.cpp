@@ -163,6 +163,10 @@ public:
     std::string detect_screen(const std::string& id, const float confThreshold, const float iouThreshold)
     {
         const auto mat = mss.wait_and_get_frame();
+        if (mat.empty())
+        {
+            return failResult;
+        }
         return detect(id, mat, confThreshold, iouThreshold);
     }
 };
