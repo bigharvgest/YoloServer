@@ -21,22 +21,14 @@ private:
     std::string failResult;
     std::unordered_map<std::string, std::shared_ptr<YOLO11Model>> modelMap;
 
-    // 屏幕检测线程相关成员
-    std::mutex screenDetectMutex;
-    std::string latestScreenDetectResult;
-    std::atomic<bool> screenDetectRunning{false};
-    std::thread screenDetectThread;
-
 public:
     explicit YOLOServer()
     {
-        auto monitors = mss.get_monitors();
         nlohmann::json fail_result_;
         fail_result_["results"] = nlohmann::json::array();
         fail_result_["count"] = 0;
         fail_result_["success"] = false;
         failResult = fail_result_.dump();
-        latestScreenDetectResult = fail_result_.dump();
 
         nlohmann::json success_result_;
         success_result_["success"] = true;
@@ -48,59 +40,6 @@ public:
     std::string getFailResult()
     {
         return failResult;
-    }
-
-    // 启动屏幕采集和检测线程
-    void start_screen_detect_thread(const std::string& modelId,
-                                    const float confThreshold = 0.4f,
-                                    const float iouThreshold = 0.45f)
-    {
-        if (screenDetectRunning.load())
-        {
-            return; // 已经运行
-        }
-
-        screenDetectRunning.store(true);
-        screenDetectThread = std::thread([this, modelId, confThreshold, iouThreshold]
-        {
-            while (screenDetectRunning.load())
-            {
-                cv::Mat frame = wait_and_get_frame();
-                if (frame.empty())
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                    continue;
-                }
-
-                {
-                    const std::string detectResult = detect(modelId, frame, confThreshold, iouThreshold);
-                    std::lock_guard lock(screenDetectMutex);
-                    latestScreenDetectResult = detectResult;
-                }
-            }
-
-            {
-                std::lock_guard lock(screenDetectMutex);
-                latestScreenDetectResult = failResult;
-            }
-        });
-        screenDetectThread.detach();
-    }
-
-    // 停止线程
-    void stop_screen_detect_thread()
-    {
-        if (screenDetectRunning.load())
-        {
-            screenDetectRunning.store(false);
-        }
-    }
-
-    // 获取当前屏幕检测结果
-    std::string get_latest_screen_detect_result()
-    {
-        std::lock_guard lock(screenDetectMutex);
-        return latestScreenDetectResult;
     }
 
     // 加载模型
@@ -143,11 +82,9 @@ public:
     }
 
     // 启动屏幕截图
-    std::string start_capture(const std::string& id, const float confThreshold, const float iouThreshold,
-                              const int monitor_index, const int x,
+    std::string start_capture(const int monitor_index, const int x,
                               const int y, const int width, const int height)
     {
-        start_screen_detect_thread(id, confThreshold, iouThreshold);
         mss.start_capture(monitor_index, x, y, width, height);
         return successResult;
     }
@@ -155,7 +92,6 @@ public:
     // 停止屏幕截图
     std::string stop_capture()
     {
-        stop_screen_detect_thread();
         mss.stop_capture();
         return successResult;
     }
@@ -221,6 +157,13 @@ public:
             }
         }
         return failResult;
+    }
+
+    // 检查屏幕
+    std::string detect_screen(const std::string& id, const float confThreshold, const float iouThreshold)
+    {
+        const auto mat = mss.wait_and_get_frame();
+        return detect(id, mat, confThreshold, iouThreshold);
     }
 };
 
@@ -420,9 +363,6 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 // 开始捕获屏幕
                 else if (action == "start_capture")
                 {
-                    std::string id = json.value("id", "default");
-                    float confThreshold = json.value("confThreshold", 0.4f);
-                    float iouThreshold = json.value("iouThreshold", 0.45f);
                     int monitor_index = json.value("monitor_index", 0);
                     int x = json.value("x", 0);
                     int y = json.value("y", 0);
@@ -430,7 +370,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                     int height = json.value("height", 0);
                     std::cout << u8"开始捕获屏幕" << std::endl;
                     // 开始捕获屏幕逻辑
-                    result = server.start_capture(id, confThreshold, iouThreshold, monitor_index, x, y, width, height);
+                    result = server.start_capture(monitor_index, x, y, width, height);
                 }
                 else if (action == "stop_capture")
                 {
@@ -461,7 +401,10 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                 }
                 else if (action == "detect_screen")
                 {
-                    result = server.get_latest_screen_detect_result();
+                    std::string id = json.value("id", "default");
+                    float confThreshold = json.value("confThreshold", 0.4f);
+                    float iouThreshold = json.value("iouThreshold", 0.45f);
+                    result = server.detect_screen(id, confThreshold, iouThreshold);
                 }
             }
 
