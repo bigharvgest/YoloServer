@@ -44,31 +44,31 @@ public:
 
     // 加载模型
     std::string load_model(const std::string& id, const std::string& task, const std::vector<char>& modelBuffer,
-                           const bool isGpu)
+                           const bool isGpu, const int device)
     {
         if (task == "detect")
         {
-            modelMap[id] = std::make_shared<YOLO11Detect>(modelBuffer, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Detect>(modelBuffer, isGpu, device);
             return successResult;
         }
         if (task == "obb")
         {
-            modelMap[id] = std::make_shared<YOLO11OBB>(modelBuffer, isGpu);
+            modelMap[id] = std::make_shared<YOLO11OBB>(modelBuffer, isGpu, device);
             return successResult;
         }
         if (task == "segment")
         {
-            modelMap[id] = std::make_shared<YOLO11Segment>(modelBuffer, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Segment>(modelBuffer, isGpu, device);
             return successResult;
         }
         if (task == "pose")
         {
-            modelMap[id] = std::make_shared<YOLO11Pose>(modelBuffer, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Pose>(modelBuffer, isGpu, device);
             return successResult;
         }
         if (task == "classify")
         {
-            modelMap[id] = std::make_shared<YOLO11Classify>(modelBuffer, isGpu);
+            modelMap[id] = std::make_shared<YOLO11Classify>(modelBuffer, isGpu, device);
             return successResult;
         }
         return failResult;
@@ -332,6 +332,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                     std::string password = json.value("password", "");
                     std::string task = json.value("task", "detect");
                     bool isGpu = json.value("isGpu", false);
+                    int device = json.value("device", 0);
 
                     if (std::wstring w_model_path = YOLOUtils::utf8_to_wstring(modelPath); !std::filesystem::exists(
                         w_model_path))
@@ -352,7 +353,7 @@ void ProcessClient(HANDLE pipe, YOLOServer& server)
                                 <<
                                 isGpu << std::endl;
                             // 加载模型逻辑
-                            result = server.load_model(id, task, modelBuffer, isGpu);
+                            result = server.load_model(id, task, modelBuffer, isGpu, device);
                         }
                     }
                 }

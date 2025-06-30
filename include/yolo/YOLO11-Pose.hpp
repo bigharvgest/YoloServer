@@ -351,8 +351,9 @@ public:
      *
      * @param modelBuffer 模型二进制
      * @param useGPU Whether to use GPU for inference (default is false).
+     * @param device GPU device ID to use (default is 0).
      */
-    explicit YOLO11Pose(const std::vector<char>& modelBuffer, bool useGPU = false);
+    explicit YOLO11Pose(const std::vector<char>& modelBuffer, bool useGPU = false, int device = 0);
 
     std::string getTask() const override { return "pose"; }
 
@@ -417,7 +418,7 @@ private:
 
 
 // Implementation of YOLO11POSEDetector constructor
-inline YOLO11Pose::YOLO11Pose(const std::vector<char>& modelBuffer, bool useGPU)
+inline YOLO11Pose::YOLO11Pose(const std::vector<char>& modelBuffer, bool useGPU, int device)
 {
     // Initialize ONNX Runtime environment with warning level
     env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "YOLO_POSE");
@@ -438,7 +439,7 @@ inline YOLO11Pose::YOLO11Pose(const std::vector<char>& modelBuffer, bool useGPU)
         OrtApi const& ortApi = Ort::GetApi();
         OrtDmlApi const* ortDmlApi = nullptr;
         ortApi.GetExecutionProviderApi("DML", ORT_API_VERSION, reinterpret_cast<void const**>(&ortDmlApi));
-        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, 0);
+        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, device);
     }
     else
     {

@@ -118,7 +118,7 @@ class YOLO11Segment : public YOLO11Model
 {
 public:
     explicit YOLO11Segment(const std::vector<char>& modelBuffer,
-                           bool useGPU = false);
+                           bool useGPU = false, int device = 0);
 
     std::string getTask() const override { return "segment"; }
 
@@ -171,7 +171,7 @@ private:
 };
 
 inline YOLO11Segment::YOLO11Segment(const std::vector<char>& modelBuffer,
-                                    bool useGPU)
+                                    bool useGPU, int device)
 {
     ScopedTimer timer("YOLOv11SegDetector Constructor");
 
@@ -194,7 +194,7 @@ inline YOLO11Segment::YOLO11Segment(const std::vector<char>& modelBuffer,
         OrtApi const& ortApi = Ort::GetApi();
         OrtDmlApi const* ortDmlApi = nullptr;
         ortApi.GetExecutionProviderApi("DML", ORT_API_VERSION, reinterpret_cast<void const**>(&ortDmlApi));
-        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, 0);
+        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, device);
     }
     else
     {

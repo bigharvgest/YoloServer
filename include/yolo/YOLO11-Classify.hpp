@@ -133,7 +133,7 @@ public:
      * @brief Constructor to initialize the classifier with model and label paths.
      */
     explicit YOLO11Classify(const std::vector<char>& modelBuffer,
-                            bool useGPU = false);
+                            bool useGPU = false, int device = 0);
 
     std::string getTask() const override { return "classify"; }
 
@@ -179,7 +179,7 @@ private:
 };
 
 // Implementation of YOLO11Classify constructor
-inline YOLO11Classify::YOLO11Classify(const std::vector<char>& modelBuffer, bool useGPU)
+inline YOLO11Classify::YOLO11Classify(const std::vector<char>& modelBuffer, bool useGPU, int device)
 {
     env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "YOLO_CLASSIFY");
     sessionOptions = Ort::SessionOptions();
@@ -198,7 +198,7 @@ inline YOLO11Classify::YOLO11Classify(const std::vector<char>& modelBuffer, bool
         OrtApi const& ortApi = Ort::GetApi();
         OrtDmlApi const* ortDmlApi = nullptr;
         ortApi.GetExecutionProviderApi("DML", ORT_API_VERSION, reinterpret_cast<void const**>(&ortDmlApi));
-        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, 0);
+        ortDmlApi->SessionOptionsAppendExecutionProvider_DML(sessionOptions, device);
     }
     else
     {
