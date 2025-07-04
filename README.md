@@ -10,8 +10,4 @@
 
 ## 基于Windows和DirectML和命名管道调用Yolo Onnx 模型
 
-## 支持Yolov5-yolov8-yolo11-Yolo12模型调用
-
-## [演示视频点此](https://www.bilibili.com/video/BV1xuMqznE9C)
-
-## QQ交流群：484373172
+## 支持Yolov5-yolov8-yolo11-yolo12-yolo13模型调用
